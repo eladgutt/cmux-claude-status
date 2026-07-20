@@ -87,7 +87,9 @@ This is a single boolean marker, not a per-task registry - it tracks "is anythin
 - **The needs-you/idle split is a text heuristic.** `Notification` fires for both real permission asks and plain "still waiting on you" idle nudges; this distinguishes them by checking whether the message contains the word "permission". If Claude Code ever ships a genuinely-blocking notification worded differently, it'll currently be misclassified as idle.
 - **`settings.json` is shared across every concurrently-open Claude Code session on your machine.** If you run many sessions at once, one session flushing its own in-memory settings back to disk can clobber hook entries another session (or this installer) just added. There's no real fix for this short of Claude Code itself not doing whole-file rewrites; if a row stops updating, re-run `install.sh`.
 - **The mode icon only updates on the next tool call after you cycle modes with shift+tab.** There's no dedicated hook for the mode-change keystroke itself, only the `permission_mode` field riding along inside the next `PreToolUse` payload.
-- **The 1s blink needs the shell snippet below; without it the blink is event-driven.** cmux's sidebar rows are static and its socket rejects orphaned processes, so the only place a steady 1-second heartbeat can live is as a child of the tab's long-lived shell. Add this to the shell startup file your terminals actually use (`~/.bash_profile` for bash login shells - which is also what cmux's Claude tabs run - or `~/.config/fish/config.fish` / `~/.zshrc` translated accordingly):
+- **The 1s blink needs a shell snippet; without it the blink is event-driven.** cmux's sidebar rows are static and its socket rejects orphaned processes, so the only place a steady 1-second heartbeat can live is as a child of the tab's long-lived shell. Important: add it to the startup file of the shell cmux terminals ACTUALLY run - check with `ps` before assuming. Fresh cmux tabs run your configured interactive shell (fish, zsh, ...) which may differ from your login shell; cmux's restored agent tabs additionally run `bash -lic`, which reads `~/.bash_profile`. Cover both.
+
+  bash (`~/.bash_profile`):
 
   ```bash
   # cmux-claude-status: 1s crunching blinker (must be a child of this shell)
@@ -96,4 +98,16 @@ This is a single boolean marker, not a per-task registry - it tracks "is anythin
   fi
   ```
 
-  One heartbeat runs per surface (pid-lock), it only writes while the state is `crunching`, and it exits on its own when the tab's shell dies. Without the snippet you still get motion, just irregular: frames advance on each tool call (`PreToolUse`, focus-independent) and each statusLine tick (focused tab only) - so a long thinking stretch on a backgrounded tab shows a frozen gear.
+  fish (`~/.config/fish/config.fish`) - deferred to first prompt so cmux's fish integration has definitely run:
+
+  ```fish
+  function __ccs_blink --on-event fish_prompt
+      functions -e __ccs_blink
+      if set -q CMUX_SURFACE_ID; and test -S "$CMUX_SOCKET_PATH"; and test -f "$HOME/.claude/hooks/cmux-claude-status.sh"
+          bash "$HOME/.claude/hooks/cmux-claude-status.sh" blink </dev/null >/dev/null 2>&1 &
+          disown 2>/dev/null
+      end
+  end
+  ```
+
+  One heartbeat runs per surface (pid-lock), it only writes while the state is `crunching`, and it exits on its own when the tab's shell dies. Tabs opened before the snippet was added keep the fallback until their shell restarts. The blink alternates the gear icon AND cycles trailing dots in the text (`crunching .` / `crunching ..`) - the text change is deliberate, so the frame is visible even if the sidebar only repaints on text diffs. Without any snippet you still get motion, just irregular: frames advance on each tool call (`PreToolUse`, focus-independent) and each statusLine tick (focused tab only) - so a long thinking stretch on a backgrounded tab shows a frozen gear.

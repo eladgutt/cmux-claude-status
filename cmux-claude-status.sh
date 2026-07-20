@@ -41,10 +41,13 @@ BLINK_LOCK="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.blinker"
 CRUNCH_ICON=gearshape.fill
 CRUNCH_COLOR='#E8833A'
 current_frame() {
+    # Dots cycle too, not just the icon: guarantees the row TEXT differs
+    # every frame, so the blink shows even if cmux only repaints on text
+    # changes (icon/color-only diffing unverified).
     if [ "$(cat "$FRAME_FILE" 2>/dev/null)" = 1 ]; then
-        CRUNCH_ICON=gearshape; CRUNCH_COLOR='#F7B267'
+        CRUNCH_ICON=gearshape; CRUNCH_COLOR='#F7B267'; CRUNCH_DOTS=' ..'
     else
-        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#E8833A'
+        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#E8833A'; CRUNCH_DOTS=' .'
     fi
 }
 advance_frame() {
@@ -58,7 +61,7 @@ render() {
     local state="$1" epoch="$2" detail="$3" text icon color
     case "$state" in
         running)    current_frame
-                    icon=$CRUNCH_ICON;          color=$CRUNCH_COLOR; text="$(fmt_clock "$epoch") crunching";;
+                    icon=$CRUNCH_ICON;          color=$CRUNCH_COLOR; text="$(fmt_clock "$epoch") crunching$CRUNCH_DOTS";;
         needsInput) icon=hand.raised.fill;      color='#E5484D'; text="$(fmt_clock "$epoch") needs you";;
         waitingBg)  icon=hourglass;              color='#0090FF'; text="$(fmt_clock "$epoch") bg agent running";;
         idle)       icon=checkmark.circle.fill; color='#46A758'; text="$(fmt_clock "$epoch") idle"; detail="";;
@@ -101,8 +104,9 @@ snippet() { printf '%s' "$RAW_INPUT" | jq -r "$1 // \"\"" 2>/dev/null | tr -d '"
 # cover sessions that were already running when this installed.
 valar_row() {
     case "${ANTHROPIC_BASE_URL:-}" in
-        *valar*) send "report_meta claude-valar \"ValarCode\" --icon=v.square.fill --color=#40B96C --priority=0 --tab=$CMUX_TAB_ID";;
-        *)       send "clear_meta claude-valar --tab=$CMUX_TAB_ID";;
+        *valar*) send "report_meta claude-valar \"Valar Serving\" --icon=v.square.fill --color=#40B96C --priority=0 --tab=$CMUX_TAB_ID";;
+        # off-gateway is visible, not blank - same orange as the direct-crunch V
+        *)       send "report_meta claude-valar \"Anthropic Serving\" --icon=a.square.fill --color=#E8833A --priority=0 --tab=$CMUX_TAB_ID";;
     esac
 }
 
