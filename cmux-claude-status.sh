@@ -98,15 +98,17 @@ set_state() { save "$1" "$NOW" "$2"; render "$1" "$NOW" "$2"; }
 
 snippet() { printf '%s' "$RAW_INPUT" | jq -r "$1 // \"\"" 2>/dev/null | tr -d '"\\\r' | tr '\n' ' ' | sed -e 's/^ *//' -e 's/ *$//' | cut -c1-48; }
 
-# "V" badge when this session routes through the ValarCode gateway. The env
+# Routing badge: teal V via the ValarCode gateway, yellow A direct to
+# Anthropic. Teal/yellow on purpose - the obvious brand colors (Valar green
+# #40B96C, Anthropic clay-orange) sit on top of the idle/crunching status
+# colors, and route must never be confusable with state at a glance. The env
 # is inherited from the claude process and fixed for its lifetime, so this
 # can't flip mid-session - rendered at start and refreshed on tick to also
 # cover sessions that were already running when this installed.
 valar_row() {
     case "${ANTHROPIC_BASE_URL:-}" in
-        *valar*) send "report_meta claude-valar \"Valar Serving\" --icon=v.square.fill --color=#40B96C --priority=0 --tab=$CMUX_TAB_ID";;
-        # off-gateway is visible, not blank - same orange as the direct-crunch V
-        *)       send "report_meta claude-valar \"Anthropic Serving\" --icon=a.square.fill --color=#E8833A --priority=0 --tab=$CMUX_TAB_ID";;
+        *valar*) send "report_meta claude-valar \"Valar Serving\" --icon=v.square.fill --color=#14B8A6 --priority=0 --tab=$CMUX_TAB_ID";;
+        *)       send "report_meta claude-valar \"Anthropic Serving\" --icon=a.square.fill --color=#EAB308 --priority=0 --tab=$CMUX_TAB_ID";;
     esac
 }
 
