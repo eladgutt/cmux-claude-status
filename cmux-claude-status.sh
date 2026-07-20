@@ -15,7 +15,10 @@ set -u
 [ -S "$CMUX_SOCKET_PATH" ] || exit 0
 
 EVENT="${1:-}"
-RAW_INPUT="$(cat)"
+# blink is launched from a shell rc with the terminal on stdin - cat would
+# block forever (or eat keystrokes). It never needs a JSON payload anyway.
+RAW_INPUT=""
+[ "$EVENT" = blink ] || RAW_INPUT="$(cat)"
 DIR="$HOME/.cache/cmux-claude-status"
 STATE_FILE="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.state"
 BG_MARKER="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.bg-pending"
@@ -29,26 +32,33 @@ fmt_clock() { date -r "$1" '+[%H:%M]' 2>/dev/null; }
 # Blink the crunching gear (filled+bright <-> outline+dim) so an active row
 # visibly moves. A gear, not a bolt - bolt.fill is the auto-mode icon on the
 # info row and the two were confusable at a glance. report_meta rows are
-# static - cmux has no animation support - so each frame advance rides an
-# event that fires anyway while crunching: every PreToolUse (any tool call,
-# focus-independent) and every statusLine tick (while the tab is focused).
-# No events = no blink, which is honest: a frozen gear means nothing has
-# happened since.
+# static - cmux has no animation support - so the frame is advanced by the
+# `blink` heartbeat (a 1s loop parented to the tab's shell; see below), with
+# busy/tick advancing as a fallback for tabs whose shell predates the rc
+# snippet. render() always draws whatever frame the file currently holds.
 FRAME_FILE="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.frame"
+BLINK_LOCK="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.blinker"
 CRUNCH_ICON=gearshape.fill
 CRUNCH_COLOR='#E8833A'
+current_frame() {
+    if [ "$(cat "$FRAME_FILE" 2>/dev/null)" = 1 ]; then
+        CRUNCH_ICON=gearshape; CRUNCH_COLOR='#F7B267'
+    else
+        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#E8833A'
+    fi
+}
 advance_frame() {
     local idx
     idx=$(cat "$FRAME_FILE" 2>/dev/null || echo 0)
-    idx=$(( (idx + 1) % 2 ))
-    printf '%s' "$idx" > "$FRAME_FILE"
-    if [ "$idx" = 1 ]; then CRUNCH_ICON=gearshape; CRUNCH_COLOR='#F7B267'; fi
+    printf '%s' "$(( (idx + 1) % 2 ))" > "$FRAME_FILE"
 }
+blinker_alive() { kill -0 "$(cat "$BLINK_LOCK" 2>/dev/null)" 2>/dev/null; }
 
 render() {
     local state="$1" epoch="$2" detail="$3" text icon color
     case "$state" in
-        running)    icon=$CRUNCH_ICON;          color=$CRUNCH_COLOR; text="$(fmt_clock "$epoch") crunching";;
+        running)    current_frame
+                    icon=$CRUNCH_ICON;          color=$CRUNCH_COLOR; text="$(fmt_clock "$epoch") crunching";;
         needsInput) icon=hand.raised.fill;      color='#E5484D'; text="$(fmt_clock "$epoch") needs you";;
         waitingBg)  icon=hourglass;              color='#0090FF'; text="$(fmt_clock "$epoch") bg agent running";;
         idle)       icon=checkmark.circle.fill; color='#46A758'; text="$(fmt_clock "$epoch") idle"; detail="";;
@@ -58,8 +68,29 @@ render() {
     send "report_meta claude \"$text\" --icon=$icon --color=$color --priority=1 --tab=$CMUX_TAB_ID"
 }
 
-read_state() { { read -r S_STATE; read -r S_EPOCH; read -r S_DETAIL; } < "$STATE_FILE" 2>/dev/null; }
-save() { printf '%s\n%s\n%s\n' "$1" "$2" "$3" > "$STATE_FILE"; }
+read_state() { { read -r S_STATE; read -r S_EPOCH; read -r S_DETAIL; read -r S_PID; read -r S_ROUTE; } < "$STATE_FILE" 2>/dev/null; }
+
+# Line 5: whether this claude routes through the ValarCode gateway (same
+# ANTHROPIC_BASE_URL test as valar_row; env inherited from claude, so per
+# session-lifetime like the badge). Lets the menu bar V color crunching by
+# routing - green via ValarCode, orange direct.
+case "${ANTHROPIC_BASE_URL:-}" in *valar*) ROUTE=valar;; *) ROUTE=direct;; esac
+
+# Line 4 of the state file: the claude process pid, so out-of-band readers
+# (the ValarClaudeStatus menu bar app) can drop files whose session died
+# without an `end` hook (killed tab = no SessionEnd = state frozen at
+# "running"). Walk up from the hook shell; the claude binary's comm is
+# literally "claude". Empty on no match - readers fall back to mtime age.
+claude_pid() {
+    local p=$PPID c
+    for _ in 1 2 3 4 5 6; do
+        [ -n "$p" ] && [ "$p" != 1 ] || break
+        c=$(ps -o comm= -p "$p" 2>/dev/null) || break
+        case "$c" in *claude*) printf '%s' "$p"; return;; esac
+        p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+    done
+}
+save() { printf '%s\n%s\n%s\n%s\n%s\n' "$1" "$2" "$3" "$(claude_pid)" "$ROUTE" > "$STATE_FILE"; }
 set_state() { save "$1" "$NOW" "$2"; render "$1" "$NOW" "$2"; }
 
 snippet() { printf '%s' "$RAW_INPUT" | jq -r "$1 // \"\"" 2>/dev/null | tr -d '"\\\r' | tr '\n' ' ' | sed -e 's/^ *//' -e 's/ *$//' | cut -c1-48; }
@@ -121,6 +152,25 @@ case "$EVENT" in
         if [ -f "$BG_MARKER" ]; then set_state waitingBg ""; else set_state idle ""; fi
         ;;
     start)  set_state idle ""; valar_row;;
+    blink)
+        # The 1s heartbeat that actually animates the gear. Launched from the
+        # tab's shell rc (see README) so it stays a LIVE DESCENDANT of the
+        # cmux terminal - the socket rejects orphans, and hook processes exit
+        # too fast to parent anything durable. One per surface via pid-lock;
+        # exits when the parent shell dies (tab closed).
+        blinker_alive && exit 0
+        printf '%s' "$$" > "$BLINK_LOCK"
+        while :; do
+            sleep 1
+            kill -0 "$PPID" 2>/dev/null || exit 0
+            [ -S "$CMUX_SOCKET_PATH" ] || exit 0
+            [ -f "$STATE_FILE" ] || continue
+            read_state
+            [ "${S_STATE:-}" = running ] || continue
+            advance_frame
+            render running "$S_EPOCH" "$S_DETAIL"
+        done
+        ;;
     busy)
         # PreToolUse: a tool is actually executing - the only hard proof that
         # a turn resumed after a permission grant (no hook fires on "user
@@ -130,7 +180,10 @@ case "$EVENT" in
         # purely to advance the blink frame.
         [ -f "$STATE_FILE" ] && read_state
         if [ "${S_STATE:-}" = running ]; then
-            advance_frame
+            # one-time upgrade: re-save files predating the pid (line 4) or
+            # route (line 5) format so in-flight sessions pick them up mid-turn
+            { [ -z "${S_PID:-}" ] || [ -z "${S_ROUTE:-}" ]; } && save running "$S_EPOCH" "$S_DETAIL"
+            blinker_alive || advance_frame
             render running "$S_EPOCH" "$S_DETAIL"
         else
             set_state running "$(snippet .tool_name)"
@@ -158,11 +211,12 @@ case "$EVENT" in
         # $RAW_INPUT here is the statusLine JSON payload (model/effort/context
         # live here, not in hook events)
         # Keep the crunching blink moving while the tab is focused, even
-        # through long thinking stretches with no tool calls.
+        # through long thinking stretches with no tool calls (fallback when
+        # no blink heartbeat is running for this surface).
         if [ -f "$STATE_FILE" ]; then
             read_state
             if [ "$S_STATE" = running ]; then
-                advance_frame
+                blinker_alive || advance_frame
                 render running "$S_EPOCH" "$S_DETAIL"
             fi
         fi

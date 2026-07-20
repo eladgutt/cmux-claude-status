@@ -87,4 +87,13 @@ This is a single boolean marker, not a per-task registry - it tracks "is anythin
 - **The needs-you/idle split is a text heuristic.** `Notification` fires for both real permission asks and plain "still waiting on you" idle nudges; this distinguishes them by checking whether the message contains the word "permission". If Claude Code ever ships a genuinely-blocking notification worded differently, it'll currently be misclassified as idle.
 - **`settings.json` is shared across every concurrently-open Claude Code session on your machine.** If you run many sessions at once, one session flushing its own in-memory settings back to disk can clobber hook entries another session (or this installer) just added. There's no real fix for this short of Claude Code itself not doing whole-file rewrites; if a row stops updating, re-run `install.sh`.
 - **The mode icon only updates on the next tool call after you cycle modes with shift+tab.** There's no dedicated hook for the mode-change keystroke itself, only the `permission_mode` field riding along inside the next `PreToolUse` payload.
-- **The crunching blink is event-driven, not a timer.** Each frame advance rides a tool call (`PreToolUse`, focus-independent) or a statusLine tick (focused tab only) - cmux's sidebar rows are static and nothing can animate them from the background. A gear that stops blinking means no tool has run since, which during a long thinking stretch on a backgrounded tab is expected.
+- **The 1s blink needs the shell snippet below; without it the blink is event-driven.** cmux's sidebar rows are static and its socket rejects orphaned processes, so the only place a steady 1-second heartbeat can live is as a child of the tab's long-lived shell. Add this to the shell startup file your terminals actually use (`~/.bash_profile` for bash login shells - which is also what cmux's Claude tabs run - or `~/.config/fish/config.fish` / `~/.zshrc` translated accordingly):
+
+  ```bash
+  # cmux-claude-status: 1s crunching blinker (must be a child of this shell)
+  if [ -n "${CMUX_SURFACE_ID:-}" ] && [ -S "${CMUX_SOCKET_PATH:-}" ] && [ -f "$HOME/.claude/hooks/cmux-claude-status.sh" ]; then
+      bash "$HOME/.claude/hooks/cmux-claude-status.sh" blink </dev/null >/dev/null 2>&1 & disown 2>/dev/null
+  fi
+  ```
+
+  One heartbeat runs per surface (pid-lock), it only writes while the state is `crunching`, and it exits on its own when the tab's shell dies. Without the snippet you still get motion, just irregular: frames advance on each tool call (`PreToolUse`, focus-independent) and each statusLine tick (focused tab only) - so a long thinking stretch on a backgrounded tab shows a frozen gear.
