@@ -10,11 +10,12 @@ Two rows appear under each workspace:
 ```
 
 - **State row** - one of:
-  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working; the bolt icon blinks (filled/bright vs outline/dim) as work happens, so a live session visibly moves
+  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working; the gear icon blinks (filled/bright vs outline/dim) as work happens, so a live session visibly moves
   - 🔴 `[HH:MM] needs you - <reason>` - actually blocked on a permission prompt
   - 🔵 `[HH:MM] bg agent running` - the main turn parked, but it launched a background subagent that's still working
   - 🟢 `[HH:MM] idle` - genuinely done, nothing outstanding
-- **Model/context row** - `<model> - <effort> - <context %>`, colored green/orange/red as context fills up, with the icon swapped to reflect the current permission mode (auto/plan/accept-edits/bypass/ask) instead of a generic cpu icon.
+- **Model/context row** - `<model> - <effort> - <context %>`, with the icon swapped to reflect the current permission mode (auto/plan/accept-edits/bypass/ask) instead of a generic cpu icon. Colored gray/violet/fuchsia as context fills up - deliberately a different hue family from every state color, so a full-context session can't be mistaken for a blocked one at a glance (and the crunching gear can't be confused with auto mode's bolt).
+- **Gateway badge** (optional) - a green `V` badge appears for sessions routed through a custom `ANTHROPIC_BASE_URL` containing `valar`. Since a process's env is fixed at launch, this is accurate per session even if you toggle the gateway between sessions. If you don't use such a gateway, the row simply never appears - or adapt the one-line match in `valar_row()` to badge whatever gateway you use.
 
 All timestamps are fixed clock times, not elapsed counters. Nothing can tick a live counter in the background (see [Why clock times, not elapsed counters](#why-clock-times-not-elapsed-counters)), so a wall-clock time is the only thing that stays honest without needing a process to keep updating it.
 
@@ -86,4 +87,4 @@ This is a single boolean marker, not a per-task registry - it tracks "is anythin
 - **The needs-you/idle split is a text heuristic.** `Notification` fires for both real permission asks and plain "still waiting on you" idle nudges; this distinguishes them by checking whether the message contains the word "permission". If Claude Code ever ships a genuinely-blocking notification worded differently, it'll currently be misclassified as idle.
 - **`settings.json` is shared across every concurrently-open Claude Code session on your machine.** If you run many sessions at once, one session flushing its own in-memory settings back to disk can clobber hook entries another session (or this installer) just added. There's no real fix for this short of Claude Code itself not doing whole-file rewrites; if a row stops updating, re-run `install.sh`.
 - **The mode icon only updates on the next tool call after you cycle modes with shift+tab.** There's no dedicated hook for the mode-change keystroke itself, only the `permission_mode` field riding along inside the next `PreToolUse` payload.
-- **The crunching blink is event-driven, not a timer.** Each frame advance rides a tool call (`PreToolUse`, focus-independent) or a statusLine tick (focused tab only) - cmux's sidebar rows are static and nothing can animate them from the background. A bolt that stops blinking means no tool has run since, which during a long thinking stretch on a backgrounded tab is expected.
+- **The crunching blink is event-driven, not a timer.** Each frame advance rides a tool call (`PreToolUse`, focus-independent) or a statusLine tick (focused tab only) - cmux's sidebar rows are static and nothing can animate them from the background. A gear that stops blinking means no tool has run since, which during a long thinking stretch on a backgrounded tab is expected.
