@@ -22,6 +22,7 @@ RAW_INPUT=""
 DIR="$HOME/.cache/cmux-claude-status"
 STATE_FILE="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.state"
 BG_MARKER="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.bg-pending"
+PROC_MARKER="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.proc-pending"
 mkdir -p "$DIR"
 NOW=$(date +%s)
 
@@ -64,6 +65,7 @@ render() {
                     icon=$CRUNCH_ICON;          color=$CRUNCH_COLOR; text="$(fmt_clock "$epoch") crunching$CRUNCH_DOTS";;
         needsInput) icon=hand.raised.fill;      color='#E5484D'; text="$(fmt_clock "$epoch") needs you";;
         waitingBg)  icon=hourglass;              color='#0090FF'; text="$(fmt_clock "$epoch") bg agent running";;
+        waitingProc) icon=terminal.fill;          color='#0090FF'; text="$(fmt_clock "$epoch") bg process running";;
         idle)       icon=checkmark.circle.fill; color='#46A758'; text="$(fmt_clock "$epoch") idle"; detail="";;
         *) return;;
     esac
@@ -98,18 +100,18 @@ set_state() { save "$1" "$NOW" "$2"; render "$1" "$NOW" "$2"; }
 
 snippet() { printf '%s' "$RAW_INPUT" | jq -r "$1 // \"\"" 2>/dev/null | tr -d '"\\\r' | tr '\n' ' ' | sed -e 's/^ *//' -e 's/ *$//' | cut -c1-48; }
 
-# Routing badge: teal V via the ValarCode gateway, white A direct to
-# Anthropic. On purpose - the obvious brand colors (Valar green #40B96C,
-# Anthropic clay-orange) sit on top of the idle/crunching status colors, and
-# yellow neighbors crunching orange too; white is the one family unlike every
-# colored field, so route can never be confused with state at a glance. The env
+# Routing badge: teal V via the ValarCode gateway, dark navy A direct to
+# Anthropic (Elad's pick). Not the brand colors on purpose - Valar green
+# #40B96C and Anthropic clay-orange sit on top of the idle/crunching status
+# colors. Navy #1E40AF is kept deliberately darker than the bg-agent azure
+# #0090FF so the two blues stay tellable apart. The env
 # is inherited from the claude process and fixed for its lifetime, so this
 # can't flip mid-session - rendered at start and refreshed on tick to also
 # cover sessions that were already running when this installed.
 valar_row() {
     case "${ANTHROPIC_BASE_URL:-}" in
         *valar*) send "report_meta claude-valar \"Valar Serving\" --icon=v.square.fill --color=#14B8A6 --priority=0 --tab=$CMUX_TAB_ID";;
-        *)       send "report_meta claude-valar \"Anthropic Serving\" --icon=a.square.fill --color=#FFFFFF --priority=0 --tab=$CMUX_TAB_ID";;
+        *)       send "report_meta claude-valar \"Anthropic Serving\" --icon=a.square.fill --color=#1E40AF --priority=0 --tab=$CMUX_TAB_ID";;
     esac
 }
 
@@ -134,8 +136,8 @@ case "$EVENT" in
     submit)
         # A new turn is starting, whether typed by the user or the synthetic
         # "<task-notification>" prompt Claude Code submits when a background
-        # agent finishes - either way any outstanding bg-agent marker is moot.
-        rm -f "$BG_MARKER"
+        # agent/process finishes - either way any outstanding markers are moot.
+        rm -f "$BG_MARKER" "$PROC_MARKER"
         set_state running "$(snippet .prompt)"
         ;;
     notify)
@@ -152,11 +154,13 @@ case "$EVENT" in
         fi
         ;;
     stop)
-        # The main turn parked. If it left a background agent running (the
-        # Agent tool defaults to run_in_background=true), that's not done -
-        # it's still crunching via a subagent, just not visible as a tool
-        # call on this session anymore.
-        if [ -f "$BG_MARKER" ]; then set_state waitingBg ""; else set_state idle ""; fi
+        # The main turn parked. If it left a background agent or a background
+        # shell process running, that's not done - work continues, just not
+        # visible as a tool call on this session anymore. Agent outranks
+        # process when both are outstanding.
+        if [ -f "$BG_MARKER" ]; then set_state waitingBg ""
+        elif [ -f "$PROC_MARKER" ]; then set_state waitingProc ""
+        else set_state idle ""; fi
         ;;
     start)  set_state idle ""; valar_row;;
     blink)
@@ -205,6 +209,12 @@ case "$EVENT" in
         if printf '%s' "$RAW_INPUT" | jq -e '.tool_name == "Agent" and (.tool_input.run_in_background != false)' >/dev/null 2>&1; then
             touch "$BG_MARKER"
         fi
+        # Background shell process ("waiting on a sub process"): unlike Agent,
+        # Bash defaults run_in_background to FALSE, so require explicit true.
+        # Workflow always runs in the background.
+        if printf '%s' "$RAW_INPUT" | jq -e '(.tool_name == "Bash" and .tool_input.run_in_background == true) or .tool_name == "Workflow"' >/dev/null 2>&1; then
+            touch "$PROC_MARKER"
+        fi
         perm_mode="$(snippet .permission_mode)"
         [ -n "$perm_mode" ] && printf '%s' "$perm_mode" > "$MODE_FILE"
         ;;
@@ -212,7 +222,7 @@ case "$EVENT" in
         send "clear_meta claude --tab=$CMUX_TAB_ID"
         send "clear_meta claude-info --tab=$CMUX_TAB_ID"
         send "clear_meta claude-valar --tab=$CMUX_TAB_ID"
-        rm -f "$STATE_FILE" "$BG_MARKER" "$MODE_FILE" "$FRAME_FILE" "$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.info-stamp"
+        rm -f "$STATE_FILE" "$BG_MARKER" "$PROC_MARKER" "$MODE_FILE" "$FRAME_FILE" "$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.info-stamp"
         ;;
     tick)
         # $RAW_INPUT here is the statusLine JSON payload (model/effort/context

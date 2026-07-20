@@ -13,9 +13,10 @@ Two rows appear under each workspace:
   - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working; the gear icon blinks (filled/bright vs outline/dim) as work happens, so a live session visibly moves
   - 🔴 `[HH:MM] needs you - <reason>` - actually blocked on a permission prompt
   - 🔵 `[HH:MM] bg agent running` - the main turn parked, but it launched a background subagent that's still working
+  - 🔵 `[HH:MM] bg process running` (terminal icon) - same idea for a background shell process or workflow: a `Bash` call with `run_in_background: true`, or a `Workflow` run
   - 🟢 `[HH:MM] idle` - genuinely done, nothing outstanding
 - **Model/context row** - `<model> - <effort> - <context %>`, with the icon swapped to reflect the current permission mode (auto/plan/accept-edits/bypass/ask) instead of a generic cpu icon. Colored gray/violet/fuchsia as context fills up - deliberately a different hue family from every state color, so a full-context session can't be mistaken for a blocked one at a glance (and the crunching gear can't be confused with auto mode's bolt).
-- **Routing badge** - a teal `V` badge for sessions routed through a custom `ANTHROPIC_BASE_URL` containing `valar`, a white `A` badge for sessions going direct to Anthropic. Deliberately not the brand colors: gateway green and Anthropic clay-orange sit on top of the idle/crunching status colors (and yellow neighbors orange), while teal and white share no family with any status or context color - routing can never be confused with state at a glance. Adapt the one-line match in `valar_row()` to badge whatever gateway you use, or make the direct branch a `clear_meta` if you don't want the `A` row.
+- **Routing badge** - a teal `V` badge for sessions routed through a custom `ANTHROPIC_BASE_URL` containing `valar`, a dark navy `A` badge for sessions going direct to Anthropic. Deliberately not the brand colors: gateway green and Anthropic clay-orange sit on top of the idle/crunching status colors. The navy is kept clearly darker than the bg-agent azure so the two blues stay apart. Adapt the one-line match in `valar_row()` to badge whatever gateway you use, or make the direct branch a `clear_meta` if you don't want the `A` row.
 
 All timestamps are fixed clock times, not elapsed counters. Nothing can tick a live counter in the background (see [Why clock times, not elapsed counters](#why-clock-times-not-elapsed-counters)), so a wall-clock time is the only thing that stays honest without needing a process to keep updating it.
 
@@ -75,9 +76,11 @@ cmux's control socket only accepts processes that are live descendants of a cmux
 
 There's no hook that fires when you answer a permission prompt, only when it's asked (`Notification`). So after granting permission and the agent resumes, nothing tells this script "we're running again" - it would otherwise sit on the stale `needsInput` state indefinitely. `PreToolUse` fires on every actual tool execution, which is the only hard proof a turn has resumed, so it's used to correct the row - but only flips state if it wasn't already `running`, so it doesn't reset the crunching-since timestamp on every single tool call.
 
-### Detecting a background agent
+### Detecting a background agent or process
 
 Claude Code's `Agent` tool defaults to `run_in_background: true`. When the main turn spawns one and then parks (fires `Stop`) before that agent finishes, that's not "done" - it's still crunching via a subagent, just invisible as a tool call on the main session. `PreToolUse` sets a marker when it sees an `Agent` call that isn't explicitly synchronous (`run_in_background: false`); `Stop` checks that marker instead of always assuming idle. The marker clears on the next `submit`, whether that's you typing something new or the synthetic `<task-notification>` prompt Claude Code submits when the background agent completes - either way a new turn starting makes the old marker moot.
+
+The same mechanism, via a second marker, covers background shell work: a `Bash` call with `run_in_background: true` (note: Bash defaults to false, the opposite of Agent) or a `Workflow` run (always background) makes a subsequent park render as `bg process running` instead of idle. When both an agent and a process are outstanding, the agent wins the label.
 
 This is a single boolean marker, not a per-task registry - it tracks "is anything outstanding", not how many background agents are still running. Good enough for the common case; if you regularly fan out several background agents per turn, it clears as soon as any one completion notification arrives even if others are still running.
 
