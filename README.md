@@ -10,7 +10,7 @@ Two rows appear under each workspace:
 ```
 
 - **State row** - one of:
-  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working
+  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working; the bolt icon blinks (filled/bright vs outline/dim) as work happens, so a live session visibly moves
   - 🔴 `[HH:MM] needs you - <reason>` - actually blocked on a permission prompt
   - 🔵 `[HH:MM] bg agent running` - the main turn parked, but it launched a background subagent that's still working
   - 🟢 `[HH:MM] idle` - genuinely done, nothing outstanding
@@ -86,3 +86,4 @@ This is a single boolean marker, not a per-task registry - it tracks "is anythin
 - **The needs-you/idle split is a text heuristic.** `Notification` fires for both real permission asks and plain "still waiting on you" idle nudges; this distinguishes them by checking whether the message contains the word "permission". If Claude Code ever ships a genuinely-blocking notification worded differently, it'll currently be misclassified as idle.
 - **`settings.json` is shared across every concurrently-open Claude Code session on your machine.** If you run many sessions at once, one session flushing its own in-memory settings back to disk can clobber hook entries another session (or this installer) just added. There's no real fix for this short of Claude Code itself not doing whole-file rewrites; if a row stops updating, re-run `install.sh`.
 - **The mode icon only updates on the next tool call after you cycle modes with shift+tab.** There's no dedicated hook for the mode-change keystroke itself, only the `permission_mode` field riding along inside the next `PreToolUse` payload.
+- **The crunching blink is event-driven, not a timer.** Each frame advance rides a tool call (`PreToolUse`, focus-independent) or a statusLine tick (focused tab only) - cmux's sidebar rows are static and nothing can animate them from the background. A bolt that stops blinking means no tool has run since, which during a long thinking stretch on a backgrounded tab is expected.
