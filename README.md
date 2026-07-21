@@ -10,7 +10,7 @@ Two rows appear under each workspace:
 ```
 
 - **State row** - one of:
-  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working; the gear icon blinks (filled/bright vs outline/dim) as work happens, so a live session visibly moves
+  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working; the gear pulses light/dark orange on a 1s heartbeat, so a live session visibly moves
   - 🔴 `[HH:MM] needs you - <reason>` - actually blocked on a permission prompt
   - 🔵 `[HH:MM] bg agent running` - the main turn parked, but it launched a background subagent that's still working
   - 🔵 `[HH:MM] bg process running` (terminal icon) - same idea for a background shell process or workflow: a `Bash` call with `run_in_background: true`, or a `Workflow` run
