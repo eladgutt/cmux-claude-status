@@ -10,7 +10,7 @@ Two rows appear under each workspace:
 ```
 
 - **State row** - one of:
-  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working; the gear pulses light/dark orange on a 1s heartbeat, so a live session visibly moves
+  - 🟠 `[HH:MM] crunching - <prompt or tool>` - actively working (static orange gear)
   - 🔴 `[HH:MM] needs you - <reason>` - actually blocked on a permission prompt
   - 🔵 `[HH:MM] bg agent running` - the main turn parked, but it launched a background subagent that's still working
   - 🔵 `[HH:MM] bg process running` (terminal icon) - same idea for a background shell process or workflow: a `Bash` call with `run_in_background: true`, or a `Workflow` run
@@ -93,27 +93,4 @@ This is a single boolean marker, not a per-task registry - it tracks "is anythin
 - **The needs-you/idle split is a text heuristic.** `Notification` fires for both real permission asks and plain "still waiting on you" idle nudges; this distinguishes them by checking whether the message contains the word "permission". If Claude Code ever ships a genuinely-blocking notification worded differently, it'll currently be misclassified as idle.
 - **`settings.json` is shared across every concurrently-open Claude Code session on your machine.** If you run many sessions at once, one session flushing its own in-memory settings back to disk can clobber hook entries another session (or this installer) just added. There's no real fix for this short of Claude Code itself not doing whole-file rewrites; if a row stops updating, re-run `install.sh`.
 - **The mode icon only updates on the next tool call after you cycle modes with shift+tab.** There's no dedicated hook for the mode-change keystroke itself, only the `permission_mode` field riding along inside the next `PreToolUse` payload.
-- **The 1s blink needs a shell snippet; without it the blink is event-driven.** cmux's sidebar rows are static and its socket rejects orphaned processes, so the only place a steady 1-second heartbeat can live is as a child of the tab's long-lived shell. Important: add it to the startup file of the shell cmux terminals ACTUALLY run - check with `ps` before assuming. Fresh cmux tabs run your configured interactive shell (fish, zsh, ...) which may differ from your login shell; cmux's restored agent tabs additionally run `bash -lic`, which reads `~/.bash_profile`. Cover both.
-
-  bash (`~/.bash_profile`):
-
-  ```bash
-  # cmux-claude-status: 1s crunching blinker (must be a child of this shell)
-  if [ -n "${CMUX_SURFACE_ID:-}" ] && [ -S "${CMUX_SOCKET_PATH:-}" ] && [ -f "$HOME/.claude/hooks/cmux-claude-status.sh" ]; then
-      bash "$HOME/.claude/hooks/cmux-claude-status.sh" blink </dev/null >/dev/null 2>&1 & disown 2>/dev/null
-  fi
-  ```
-
-  fish (`~/.config/fish/config.fish`) - deferred to first prompt so cmux's fish integration has definitely run:
-
-  ```fish
-  function __ccs_blink --on-event fish_prompt
-      functions -e __ccs_blink
-      if set -q CMUX_SURFACE_ID; and test -S "$CMUX_SOCKET_PATH"; and test -f "$HOME/.claude/hooks/cmux-claude-status.sh"
-          bash "$HOME/.claude/hooks/cmux-claude-status.sh" blink </dev/null >/dev/null 2>&1 &
-          disown 2>/dev/null
-      end
-  end
-  ```
-
-  One heartbeat runs per surface (pid-lock), it only writes while the state is `crunching`, and it exits on its own when the tab's shell dies. Tabs opened before the snippet was added keep the fallback until their shell restarts. The blink alternates the gear icon AND cycles trailing dots in the text (`crunching .` / `crunching ..`) - the text change is deliberate, so the frame is visible even if the sidebar only repaints on text diffs. Without any snippet you still get motion, just irregular: frames advance on each tool call (`PreToolUse`, focus-independent) and each statusLine tick (focused tab only) - so a long thinking stretch on a backgrounded tab shows a frozen gear.
+- **The crunching gear is static - no blink.** Earlier versions animated it via a 1-second heartbeat loop per tab (a shell-rc-launched `blink` event). With many concurrently-busy tabs, those per-second `report_meta` writes - each a synchronous hop onto cmux's main thread that queues a sidebar relayout - drove cmux (v0.64.17) into a self-sustaining SwiftUI relayout spiral: pegged main thread, beachball, runaway memory, macOS hang reports. Removed; the `blink` event is now a no-op so stale rc snippets exit harmlessly. If you have the old snippet in `~/.bash_profile` or `~/.config/fish/config.fish`, delete it.

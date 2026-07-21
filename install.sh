@@ -70,12 +70,4 @@ it away, then append this line after whatever it already prints:
 
   printf '%s' "$IN" | bash "$HOME/.claude/hooks/cmux-claude-status.sh" tick >/dev/null 2>&1
 
-For the steady 1-second crunching blink, also add the blinker snippet to the
-startup file of the shell your cmux terminals ACTUALLY run (fresh tabs run
-your configured interactive shell - fish/zsh/bash; restored agent tabs run
-bash login shells reading ~/.bash_profile - cover both). See README.md
-("The 1s blink needs a shell snippet") for the exact bash and fish snippets.
-
-Without it the blink still moves, just irregularly (on tool calls and
-focused-tab statusline ticks).
 EOF

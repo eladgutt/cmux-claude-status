@@ -30,41 +30,15 @@ send() { printf '%s\n' "$1" | nc -w 1 -U "$CMUX_SOCKET_PATH" >/dev/null 2>&1; }
 
 fmt_clock() { date -r "$1" '+[%H:%M]' 2>/dev/null; }
 
-# Blink the crunching gear (filled+bright <-> outline+dim) so an active row
-# visibly moves. A gear, not a bolt - bolt.fill is the auto-mode icon on the
-# info row and the two were confusable at a glance. report_meta rows are
-# static - cmux has no animation support - so the frame is advanced by the
-# `blink` heartbeat (a 1s loop parented to the tab's shell; see below), with
-# busy/tick advancing as a fallback for tabs whose shell predates the rc
-# snippet. render() always draws whatever frame the file currently holds.
-FRAME_FILE="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.frame"
-BLINK_LOCK="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.blinker"
-CRUNCH_ICON=gearshape.fill
-CRUNCH_COLOR='#E8833A'
-current_frame() {
-    # A hard light/dark tonal pulse of the same hue - the earlier
-    # bright-vs-slightly-paler + fill-vs-outline pair was too subtle to
-    # read as a blink at sidebar icon size. Dots cycle too: guarantees the
-    # row TEXT differs every frame, so the blink shows even if cmux only
-    # repaints on text changes (icon/color-only diffing unverified).
-    if [ "$(cat "$FRAME_FILE" 2>/dev/null)" = 1 ]; then
-        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#8A4B08'; CRUNCH_DOTS=' ..'
-    else
-        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#FFA94D'; CRUNCH_DOTS=' .'
-    fi
-}
-advance_frame() {
-    local idx
-    idx=$(cat "$FRAME_FILE" 2>/dev/null || echo 0)
-    printf '%s' "$(( (idx + 1) % 2 ))" > "$FRAME_FILE"
-}
-blinker_alive() { kill -0 "$(cat "$BLINK_LOCK" 2>/dev/null)" 2>/dev/null; }
-
+# Crunching is a STATIC orange gear. It used to blink via a 1s heartbeat
+# loop per tab, but 7 concurrent blinkers each forcing a sidebar text diff
+# every second drove cmux's main thread into a SwiftUI relayout spiral
+# (beachball, 10GB RSS, hang reports Jul 15/20/21) - removed Jul 21. A gear,
+# not a bolt - bolt.fill is the auto-mode icon on the info row.
 render() {
     local state="$1" epoch="$2" detail="$3" text icon color
     case "$state" in
-        running)    current_frame
-                    icon=$CRUNCH_ICON;          color=$CRUNCH_COLOR; text="$(fmt_clock "$epoch") crunching$CRUNCH_DOTS";;
+        running)    icon=gearshape.fill;        color='#E8833A'; text="$(fmt_clock "$epoch") crunching";;
         needsInput) icon=hand.raised.fill;      color='#E5484D'; text="$(fmt_clock "$epoch") needs you";;
         waitingBg)  icon=hourglass;              color='#0090FF'; text="$(fmt_clock "$epoch") bg agent running";;
         waitingProc) icon=terminal.fill;          color='#0090FF'; text="$(fmt_clock "$epoch") bg process running";;
@@ -166,38 +140,22 @@ case "$EVENT" in
         ;;
     start)  set_state idle ""; valar_row;;
     blink)
-        # The 1s heartbeat that actually animates the gear. Launched from the
-        # tab's shell rc (see README) so it stays a LIVE DESCENDANT of the
-        # cmux terminal - the socket rejects orphans, and hook processes exit
-        # too fast to parent anything durable. One per surface via pid-lock;
-        # exits when the parent shell dies (tab closed).
-        blinker_alive && exit 0
-        printf '%s' "$$" > "$BLINK_LOCK"
-        while :; do
-            sleep 1
-            kill -0 "$PPID" 2>/dev/null || exit 0
-            [ -S "$CMUX_SOCKET_PATH" ] || exit 0
-            [ -f "$STATE_FILE" ] || continue
-            read_state
-            [ "${S_STATE:-}" = running ] || continue
-            advance_frame
-            render running "$S_EPOCH" "$S_DETAIL"
-        done
+        # Removed (see header). Kept as an explicit no-op so a stale shell rc
+        # or restored tab that still launches it exits instead of erroring.
+        exit 0
         ;;
     busy)
         # PreToolUse: a tool is actually executing - the only hard proof that
         # a turn resumed after a permission grant (no hook fires on "user
         # answered the prompt"), so this is what corrects a stale
-        # needsInput/idle row left over from before this turn. When already
-        # running it re-renders with the SAME epoch (timestamp never moves),
-        # purely to advance the blink frame.
+        # needsInput/idle row left over from before this turn. Already
+        # running: nothing to redraw (the row text is fixed), so don't -
+        # every skipped report_meta is one less main-thread sync into cmux.
         [ -f "$STATE_FILE" ] && read_state
         if [ "${S_STATE:-}" = running ]; then
             # one-time upgrade: re-save files predating the pid (line 4) or
             # route (line 5) format so in-flight sessions pick them up mid-turn
             { [ -z "${S_PID:-}" ] || [ -z "${S_ROUTE:-}" ]; } && save running "$S_EPOCH" "$S_DETAIL"
-            blinker_alive || advance_frame
-            render running "$S_EPOCH" "$S_DETAIL"
         else
             set_state running "$(snippet .tool_name)"
         fi
@@ -246,21 +204,11 @@ case "$EVENT" in
         send "clear_meta claude --tab=$CMUX_TAB_ID"
         send "clear_meta claude-info --tab=$CMUX_TAB_ID"
         send "clear_meta claude-valar --tab=$CMUX_TAB_ID"
-        rm -f "$STATE_FILE" "$BG_MARKER" "$PROC_MARKER" "$MODE_FILE" "$FRAME_FILE" "$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.info-stamp"
+        rm -f "$STATE_FILE" "$BG_MARKER" "$PROC_MARKER" "$MODE_FILE" "$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.info-stamp"
         ;;
     tick)
         # $RAW_INPUT here is the statusLine JSON payload (model/effort/context
         # live here, not in hook events)
-        # Keep the crunching blink moving while the tab is focused, even
-        # through long thinking stretches with no tool calls (fallback when
-        # no blink heartbeat is running for this surface).
-        if [ -f "$STATE_FILE" ]; then
-            read_state
-            if [ "$S_STATE" = running ]; then
-                blinker_alive || advance_frame
-                render running "$S_EPOCH" "$S_DETAIL"
-            fi
-        fi
         INFO_STAMP="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.info-stamp"
         LAST_INFO=$(cat "$INFO_STAMP" 2>/dev/null || echo 0)
         [ $(( NOW - LAST_INFO )) -ge 5 ] || exit 0
