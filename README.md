@@ -63,7 +63,7 @@ cmux exposes a raw socket command, `report_meta`, that draws a colored icon+text
 | `SessionStart` | `start` | Renders idle |
 | `UserPromptSubmit` | `submit` | Renders crunching (a real prompt or the synthetic "task finished" notification Claude Code submits when a background agent completes) |
 | `PreToolUse` | `busy` | Corrects a stale needs-you/idle row the moment real work resumes (see below); records the current permission mode and whether a background agent/process got spawned |
-| `PostToolUse` | `post` | Catches a foreground command the harness moved to background (invisible in `PreToolUse` input, only in the tool response) |
+| `PostToolUse` | `post` | Corrects a stale needs-you row the moment an `AskUserQuestion`/permission-gated tool completes (the next `PreToolUse` may be a long thinking stretch away); also catches a foreground command the harness moved to background (invisible in `PreToolUse` input, only in the tool response) |
 | `Notification` | `notify` | Renders needs-you only if the message is actually about a permission ask; otherwise idle |
 | `Stop` | `stop` | Renders idle, or bg-agent-running if a background agent from this turn is still outstanding |
 | `SessionEnd` | `end` | Clears everything for this tab |

@@ -224,12 +224,20 @@ case "$EVENT" in
         [ -n "$perm_mode" ] && printf '%s' "$perm_mode" > "$MODE_FILE"
         ;;
     post)
-        # PostToolUse: catches backgrounding that PreToolUse can't see -
-        # a foreground Bash the harness moved to background (timeout,
-        # ctrl-b) completes its tool call with a distinctive response
-        # ("Command running in background with ID: ..."). Narrow phrases
-        # on purpose: a command whose OUTPUT merely mentions "background"
-        # must not false-positive.
+        # PostToolUse: a tool just COMPLETED, so the agent is definitely
+        # active again. This is the earliest signal after the user answers
+        # an AskUserQuestion or grants a permission - the gated tool call
+        # completes and fires this, while the next PreToolUse may be a long
+        # thinking stretch away. Corrects a stale needs-you row that busy
+        # alone left standing for minutes.
+        [ -f "$STATE_FILE" ] && read_state
+        [ "${S_STATE:-}" = running ] || set_state running "$(snippet .tool_name)"
+        # Also catches backgrounding that PreToolUse can't see - a
+        # foreground Bash the harness moved to background (timeout, ctrl-b)
+        # completes its tool call with a distinctive response ("Command
+        # running in background with ID: ..."). Narrow phrases on purpose:
+        # a command whose OUTPUT merely mentions "background" must not
+        # false-positive.
         if printf '%s' "$RAW_INPUT" | jq -e '.tool_name == "Bash" and ((.tool_response | tostring) | test("running in background with ID|moved to background"))' >/dev/null 2>&1; then
             touch "$PROC_MARKER"
         fi
