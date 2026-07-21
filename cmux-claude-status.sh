@@ -42,13 +42,15 @@ BLINK_LOCK="$DIR/${CMUX_SURFACE_ID:-$CMUX_TAB_ID}.blinker"
 CRUNCH_ICON=gearshape.fill
 CRUNCH_COLOR='#E8833A'
 current_frame() {
-    # Dots cycle too, not just the icon: guarantees the row TEXT differs
-    # every frame, so the blink shows even if cmux only repaints on text
-    # changes (icon/color-only diffing unverified).
+    # A hard light/dark tonal pulse of the same hue - the earlier
+    # bright-vs-slightly-paler + fill-vs-outline pair was too subtle to
+    # read as a blink at sidebar icon size. Dots cycle too: guarantees the
+    # row TEXT differs every frame, so the blink shows even if cmux only
+    # repaints on text changes (icon/color-only diffing unverified).
     if [ "$(cat "$FRAME_FILE" 2>/dev/null)" = 1 ]; then
-        CRUNCH_ICON=gearshape; CRUNCH_COLOR='#F7B267'; CRUNCH_DOTS=' ..'
+        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#8A4B08'; CRUNCH_DOTS=' ..'
     else
-        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#E8833A'; CRUNCH_DOTS=' .'
+        CRUNCH_ICON=gearshape.fill; CRUNCH_COLOR='#FFA94D'; CRUNCH_DOTS=' .'
     fi
 }
 advance_frame() {
