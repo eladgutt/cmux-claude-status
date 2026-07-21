@@ -23,6 +23,7 @@ EVENTS = {
     "Stop": "stop",
     "SessionEnd": "end",
     "PreToolUse": "busy",
+    "PostToolUse": "post",
 }
 
 hooks = d.setdefault("hooks", {})
@@ -37,7 +38,7 @@ for hook_name, event in EVENTS.items():
     )
     if not already:
         entry = {"type": "command", "command": cmd}
-        if hook_name == "PreToolUse":
+        if hook_name in ("PreToolUse", "PostToolUse"):
             entry["async"] = True
         groups.append({"hooks": [entry]})
         added.append(hook_name)

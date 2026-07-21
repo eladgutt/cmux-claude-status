@@ -213,12 +213,26 @@ case "$EVENT" in
         fi
         # Background shell process ("waiting on a sub process"): unlike Agent,
         # Bash defaults run_in_background to FALSE, so require explicit true.
-        # Workflow always runs in the background.
+        # Workflow always runs in the background. NB: this only catches
+        # explicit backgrounding - a foreground command the harness moves to
+        # background (timeout, ctrl-b) is invisible in tool_input; the `post`
+        # event below catches those from the tool RESPONSE.
         if printf '%s' "$RAW_INPUT" | jq -e '(.tool_name == "Bash" and .tool_input.run_in_background == true) or .tool_name == "Workflow"' >/dev/null 2>&1; then
             touch "$PROC_MARKER"
         fi
         perm_mode="$(snippet .permission_mode)"
         [ -n "$perm_mode" ] && printf '%s' "$perm_mode" > "$MODE_FILE"
+        ;;
+    post)
+        # PostToolUse: catches backgrounding that PreToolUse can't see -
+        # a foreground Bash the harness moved to background (timeout,
+        # ctrl-b) completes its tool call with a distinctive response
+        # ("Command running in background with ID: ..."). Narrow phrases
+        # on purpose: a command whose OUTPUT merely mentions "background"
+        # must not false-positive.
+        if printf '%s' "$RAW_INPUT" | jq -e '.tool_name == "Bash" and ((.tool_response | tostring) | test("running in background with ID|moved to background"))' >/dev/null 2>&1; then
+            touch "$PROC_MARKER"
+        fi
         ;;
     end)
         send "clear_meta claude --tab=$CMUX_TAB_ID"

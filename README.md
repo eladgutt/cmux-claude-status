@@ -62,7 +62,8 @@ cmux exposes a raw socket command, `report_meta`, that draws a colored icon+text
 |---|---|---|
 | `SessionStart` | `start` | Renders idle |
 | `UserPromptSubmit` | `submit` | Renders crunching (a real prompt or the synthetic "task finished" notification Claude Code submits when a background agent completes) |
-| `PreToolUse` | `busy` | Corrects a stale needs-you/idle row the moment real work resumes (see below); records the current permission mode and whether a background agent got spawned |
+| `PreToolUse` | `busy` | Corrects a stale needs-you/idle row the moment real work resumes (see below); records the current permission mode and whether a background agent/process got spawned |
+| `PostToolUse` | `post` | Catches a foreground command the harness moved to background (invisible in `PreToolUse` input, only in the tool response) |
 | `Notification` | `notify` | Renders needs-you only if the message is actually about a permission ask; otherwise idle |
 | `Stop` | `stop` | Renders idle, or bg-agent-running if a background agent from this turn is still outstanding |
 | `SessionEnd` | `end` | Clears everything for this tab |
@@ -81,6 +82,8 @@ There's no hook that fires when you answer a permission prompt, only when it's a
 Claude Code's `Agent` tool defaults to `run_in_background: true`. When the main turn spawns one and then parks (fires `Stop`) before that agent finishes, that's not "done" - it's still crunching via a subagent, just invisible as a tool call on the main session. `PreToolUse` sets a marker when it sees an `Agent` call that isn't explicitly synchronous (`run_in_background: false`); `Stop` checks that marker instead of always assuming idle. The marker clears on the next `submit`, whether that's you typing something new or the synthetic `<task-notification>` prompt Claude Code submits when the background agent completes - either way a new turn starting makes the old marker moot.
 
 The same mechanism, via a second marker, covers background shell work: a `Bash` call with `run_in_background: true` (note: Bash defaults to false, the opposite of Agent) or a `Workflow` run (always background) makes a subsequent park render as `bg process running` instead of idle. When both an agent and a process are outstanding, the agent wins the label.
+
+Explicit backgrounding is only half the story though: a foreground command the harness moves to background (timeout, or the user pressing ctrl-b) never has `run_in_background` in its input - the decision only shows up in the tool's *response* ("Command running in background with ID: ..."). A `PostToolUse` hook catches those. The phrases matched are deliberately narrow so a command whose output merely mentions "background" can't false-positive.
 
 This is a single boolean marker, not a per-task registry - it tracks "is anything outstanding", not how many background agents are still running. Good enough for the common case; if you regularly fan out several background agents per turn, it clears as soon as any one completion notification arrives even if others are still running.
 
